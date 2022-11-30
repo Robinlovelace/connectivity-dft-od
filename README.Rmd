@@ -1,0 +1,134 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# connectivity-dft-od
+
+<!-- badges: start -->
+<!-- badges: end -->
+
+
+```{r}
+library(tidyverse)
+library(tmap)
+tmap_mode("view")
+remotes::install_cran("arrow")
+urls = readr::read_csv("urls.csv")
+u1 = urls$url[1]
+# f = basename(u1)
+f1 = "car.parquet"
+if(!file.exists(f1)) {
+  download.file(u1, f1)
+}
+```
+
+
+```{r}
+od_lsoa_cars = arrow::read_parquet(f1, as_data_frame = FALSE)
+names(od_lsoa_cars)
+od_reduced = od_lsoa_cars %>% 
+  filter(travel_time_seconds < 5 * 60) 
+od_reduced
+```
+
+```{r}
+od_reduced = collect(od_reduced)
+nrow(od_reduced)
+```
+
+```{r}
+lsoas = pct::get_pct(layer = "z", national = TRUE)
+```
+
+```{r}
+summary(not_in_od <- !od_reduced$origin_lsoa %in% lsoas$geo_code)
+sum(not_in_od) / nrow(od_reduced) # 30% of origins not in OD data??
+ods_not_in_lsoas = od_reduced[not_in_od, ]
+head(ods_not_in_lsoas)
+```
+
+
+```{r}
+od_sf = od::od_to_sf(x = od_reduced, z = lsoas)
+od_sf$length_m = as.numeric(sf::st_length(od_sf))
+od_sf = od_sf %>% 
+  mutate(m_per_s = length_m / travel_time_seconds) %>% 
+  mutate(miles_euclidean = length_m / 1000 * 0.62) %>% 
+  mutate(time_hours = travel_time_seconds / (60 * 60)) %>% 
+  mutate(miles_per_hour_euclidean = miles_euclidean / time_hours)
+summary(od_sf)
+summary(od_sf$miles_per_hour_euclidean)
+
+od_sf %>% 
+  ggplot(aes(m_per_s)) +
+  geom_histogram(binwidth = 1) +
+  xlim(c(0, 10))
+
+
+od_sf %>% 
+  ggplot(aes(m_per_s)) +
+  geom_histogram(binwidth = 1) +
+  xlim(c(0, 10))
+```
+
+Get OD pairs that have v. slow average speeds.
+
+```{r}
+od_sf_fast = od_sf %>% 
+  filter(miles_per_hour_euclidean > 60)
+m = qtm(od_sf_fast)
+```
+
+```{r, echo=FALSE}
+tmap_save(m, "m1.html")
+webshot2::webshot("m1.html")
+```
+
+
+```{r}
+lsoas_fast = lsoas %>% 
+  filter(geo_code %in% c(od_sf_fast$origin_lsoa, od_sf_fast$destination_lsoa))
+```
+
+
+```{r}
+m = qtm(od_sf_fast) +
+  qtm(lsoas_fast)
+```
+
+
+
+```{r}
+oas = sf::read_sf("~/github/modeshift/Output_Areas_(December_2021)_Population_Weighted_Centroids_(Version_2).geojson")
+oas_in_msoas = oas[lsoas_fast, ]
+m = qtm(od_sf_fast) +
+  qtm(lsoas_fast) +
+  qtm(oas_in_msoas) 
+
+```
+
+
+Disaggregation of LSOA OD to OA level OD:
+
+```{r}
+od_sf_fast$population = 5
+od_sf_jittered = odjitter::jitter(od = od_sf_fast, zones = lsoas_fast, subpoints = oas_in_msoas, disaggregation_key = "population", disaggregation_threshold = 2)
+m = qtm(od_sf_jittered) +
+  qtm(lsoas_fast) +
+  qtm(oas_in_msoas)
+```
+
+
+
+
+
+
